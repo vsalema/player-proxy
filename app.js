@@ -1,6 +1,5 @@
-// Script minimal pour surveiller une page, détecter une URL .m3u8 et l'injecter dans le player.
-// Fonctionne côté client. Si la requête vers la page est bloquée pour des raisons de CORS,
-// utilisez le serveur-proxy fourni dans server.js (exécutez-le localement).
+// app.js - version debug / robuste
+console.log('[m3u8-watcher] script loaded');
 
 const pageInput = document.getElementById('pageUrl');
 const m3u8Input = document.getElementById('m3u8Url');
@@ -10,91 +9,115 @@ const manualBtn = document.getElementById('manualInject');
 const info = document.getElementById('info');
 const video = document.getElementById('video');
 
-let pollInterval = 15000; // ms
+let pollInterval = 15000;
 let pollTimer = null;
 let lastFound = null;
-let useProxy = false; // passez à true si vous utilisez server.js (proxy local)
-let proxyPrefix = 'http://localhost:3000/fetch?url='; // si vous lancez server.js
+let useProxy = false;
+let proxyPrefix = 'http://localhost:3000/fetch?url=';
 
-// Initialise Hls.js player if nécessaire
 let hls = null;
-function setSource(url) {
-  if (!url) return;
-  info.textContent = 'Injection: ' + url;
-  // Si le navigateur supporte HLS natif (Safari), on peut simplement assigner
-  if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = url;
-    video.play().catch(()=>{});
-    return;
-  }
+
+function setInfo(text) {
+  info.textContent = text;
+  console.log('[m3u8-watcher] ' + text);
+}
+
+function destroyHls() {
   if (hls) {
-    hls.destroy();
+    try { hls.destroy(); } catch(e) { console.warn(e); }
     hls = null;
-  }
-  if (Hls.isSupported()) {
-    hls = new Hls();
-    hls.loadSource(url);
-    hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, function() {
-      video.play().catch(()=>{});
-    });
-  } else {
-    info.textContent = 'HLS non supporté dans ce navigateur.';
   }
 }
 
-// Extraction d'une URL .m3u8 depuis le HTML récupéré
+async function setSource(url) {
+  if (!url) {
+    setInfo('URL vide fournie à setSource.');
+    return;
+  }
+  setInfo('Tentative d\'injection: ' + url);
+  destroyHls();
+
+  // Si Safari/native HLS
+  const native = video.canPlayType('application/vnd.apple.mpegurl') !== '';
+  console.log('Native HLS support:', native);
+
+  // Try native first only if present. Otherwise use Hls.js.
+  if (native) {
+    try {
+      video.src = url;
+      await video.play();
+      setInfo('Lecture lancée (native).');
+      return;
+    } catch (err) {
+      console.warn('Native play failed:', err);
+      // fallback to Hls.js
+    }
+  }
+
+  if (window.Hls && Hls.isSupported()) {
+    hls = new Hls();
+    hls.on(Hls.Events.ERROR, function(event, data) {
+      console.error('Hls error', event, data);
+      setInfo('Erreur Hls.js: ' + (data && data.type ? data.type + ' / ' + data.details : 'inconnue'));
+    });
+    try {
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, function() {
+        video.play().then(()=> setInfo('Lecture lancée (Hls.js).')).catch(e => {
+          console.warn('Play promise rejected:', e);
+          setInfo('Flux chargé mais lecture bloquée par le navigateur (autoplay). Appuyez sur play.');
+        });
+      });
+      return;
+    } catch (err) {
+      console.error('Hls load error', err);
+      setInfo('Impossible de charger le flux via Hls.js: ' + err.message);
+    }
+  } else {
+    setInfo('Hls.js non disponible et lecture native impossible.');
+    console.warn('Hls.js absent ou non-supporté');
+  }
+}
+
+// extraction simple d'URL .m3u8
 function extractM3U8(html) {
-  // Cherche des URLs contenant .m3u8 ou des formes avec token
-  const urlRegex = /https?:\\/\\/[^'"\s>]+\.m3u8[^'"\s>]*/ig;
-  const urlRegex2 = /https?:\/\/[^'"\s>]+\.m3u8[^'"\s>]*/ig;
-  let m;
-  let candidates = [];
-  while ((m = urlRegex2.exec(html)) !== null) {
-    candidates.push(m[0]);
-  }
-  if (candidates.length === 0) {
-    // fallback: chercher des fragments fmp4, .mp4.m3u8 etc
-    const alt = html.match(/https?:\/\/[^'"\s>]+\.fmp4\.[^'"\s>]*/ig);
-    if (alt) candidates = candidates.concat(alt);
-  }
-  return candidates.length ? candidates[0] : null;
+  if (!html) return null;
+  const r = /https?:\\/\\/[^'\"\\s>]+\\.m3u8[^'\"\\s>]*/ig;
+  const found = html.match(r);
+  return found && found.length ? found[0] : null;
 }
 
 async function fetchPage(url) {
-  try {
-    const fetchUrl = (useProxy ? proxyPrefix + encodeURIComponent(url) : url);
-    const resp = await fetch(fetchUrl, { mode: 'cors' });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const text = await resp.text();
-    return text;
-  } catch (err) {
-    throw err;
-  }
+  const fetchUrl = (useProxy ? proxyPrefix + encodeURIComponent(url) : url);
+  setInfo('Fetch: ' + fetchUrl);
+  const resp = await fetch(fetchUrl, { mode: 'cors' });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return await resp.text();
 }
 
 async function pollOnce() {
   const pageUrl = pageInput.value.trim();
   if (!pageUrl) {
-    info.textContent = 'Veuillez saisir l'URL de la page à surveiller.';
+    setInfo('Aucune URL de page fournie.');
     return;
   }
   try {
-    info.textContent = 'Récupération de la page...';
     const html = await fetchPage(pageUrl);
     const found = extractM3U8(html);
     if (found && found !== lastFound) {
       lastFound = found;
       m3u8Input.value = found;
-      setSource(found);
-      info.textContent = 'URL détectée et injectée.';
+      await setSource(found);
+      setInfo('URL détectée et injectée.');
     } else if (!found) {
-      info.textContent = 'Aucune URL .m3u8 détectée sur la page.';
+      setInfo('Aucune URL .m3u8 trouvée.');
     } else {
-      info.textContent = 'Pas de changement d'URL.';
+      setInfo('Pas de changement d\'URL.');
     }
   } catch (err) {
-    info.textContent = 'Erreur fetch: ' + err.message + '. Si CORS bloque la requête, lancez le proxy local décrit dans README.';
+    console.error('fetch error', err);
+    setInfo('Fetch échoué: ' + err.message + '. Voir console pour détails. Si CORS, utilisez proxy.');
   }
 }
 
@@ -104,7 +127,7 @@ function startPolling() {
   pollTimer = setInterval(pollOnce, pollInterval);
   startBtn.disabled = true;
   stopBtn.disabled = false;
-  info.textContent = 'Surveillance démarrée.';
+  setInfo('Surveillance démarrée.');
 }
 
 function stopPolling() {
@@ -113,29 +136,32 @@ function stopPolling() {
   pollTimer = null;
   startBtn.disabled = false;
   stopBtn.disabled = true;
-  info.textContent = 'Surveillance arrêtée.';
+  setInfo('Surveillance arrêtée.');
 }
 
 startBtn.addEventListener('click', startPolling);
 stopBtn.addEventListener('click', stopPolling);
-manualBtn.addEventListener('click', () => {
+
+manualBtn.addEventListener('click', async (e) => {
+  e.preventDefault();
   const u = m3u8Input.value.trim();
-  if (u) {
-    lastFound = u;
-    setSource(u);
-  } else {
-    info.textContent = 'Rien à injecter.';
+  console.log('Manual inject clicked. URL=', u);
+  if (!u) {
+    setInfo('Champ m3u8 vide.');
+    return;
   }
+  lastFound = u;
+  await setSource(u);
 });
 
-// Si l'utilisateur colle une URL m3u8 directement, on l'injecte automatiquement
-m3u8Input.addEventListener('change', () => {
-  const u = m3u8Input.value.trim();
-  if (u) {
-    lastFound = u;
-    setSource(u);
-  }
+// permissive paste handler: si l'utilisateur colle une m3u8, injecte
+m3u8Input.addEventListener('paste', (ev) => {
+  setTimeout(()=> {
+    const u = m3u8Input.value.trim();
+    if (u && u.includes('.m3u8')) {
+      console.log('Paste detected, auto-inject:', u);
+      lastFound = u;
+      setSource(u).catch(console.error);
+    }
+  }, 50);
 });
-
-// Permet d'ajuster le pollInterval si besoin via console:
-// window.pollInterval = 10000;
