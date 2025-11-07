@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>M3U8 Watcher & Player</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- HLS.js -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.0/dist/hls.min.js"></script>
+</head>
+<body>
+  <main>
+    <h1>M3U8 Watcher & Player</h1>
+
+    <section class="controls">
+      <label>URL de la page à surveiller
+        <input id="pageUrl" placeholder="https://www.freeshot.live/live-tv/cmtv/330" />
+      </label>
+
+      <label>URL m3u8 initiale (optionnelle)
+        <input id="m3u8Url" placeholder="https://clouding.wideiptv.top/... .m3u8?token=..." />
+      </label>
+
+      <div class="row">
+        <button id="startBtn">Démarrer la surveillance</button>
+        <button id="stopBtn" disabled>Arrêter</button>
+        <button id="manualInject">Injecter manuellement</button>
+      </div>
+
+      <div class="info" id="info"></div>
+    </section>
+
+    <section class="player">
+      <video id="video" controls playsinline></video>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
