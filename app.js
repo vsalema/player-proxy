@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(!url){ setInfo('URL m3u8 manquante.'); return; }
     setInfo('Injection: ' + url);
     destroyHls();
-    video.muted = true;
+    video.muted = false;
 
     const native = !!video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl') !== '';
     if(native){
