@@ -121,6 +121,18 @@ document.addEventListener('DOMContentLoaded', () => {
     await setSource(u);
   });
 
+  const hls = new Hls({
+  // Réduire la quantité de buffer pour éviter les gros trous
+  maxBufferLength: 20,         // secondes
+  maxMaxBufferLength: 40,
+
+  // Permettre une meilleure réactivité de l’ABR
+  maxStarvationDelay: 4,
+  maxLoadingDelay: 4,
+});
+  
+  
+  
   m3u8Input.addEventListener('change', ()=>{
     const u = m3u8Input.value.trim();
     if(u) setSource(u);
